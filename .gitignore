@@ -1,0 +1,6 @@
+__pycache_/
+
+data/
+reverse-model*/
+tokenizers/
+*.log
