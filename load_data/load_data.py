@@ -4,25 +4,28 @@ import os
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
-n_samples = 20_000_000
+n_samples = 2_000_000
 context_length = 1024
 
 
 
-DATA_PATH = "/nobackup1/wyf/"
+DATA_DIR = "/home/wyf/ai/causal-llm/data"
+
+# dataset = "dclm"
+dataset_name = "fineweb"
 
 # Takes like 30s to load (it's bad)
 raw_dataset = load_dataset(
-    "mlfoundations/dclm-baseline-1.0",
+    # "mlfoundations/dclm-baseline-1.0",
+    "HuggingFaceFW/fineweb-edu",
     split="train",
     streaming=True,
 )
 
 
 from tqdm import tqdm
-import sys
 
-def filter_dataset(dataset, n_samples: int = None):
+def filter_dataset(dataset):
     # filtered = []
     # for sample in tqdm(iter(dataset["train"].take(n_samples)), total=n_samples):
     #     # IMPORTANT REVERSAL STEP
@@ -51,5 +54,4 @@ datasets = DatasetDict({
 
 print("Saving datasets...")
 for split_name, dataset in datasets.items():
-    dataset.to_parquet(f"./data/dclm_{n_samples}/{split_name}.parquet")
-
+    dataset.to_parquet(f"{DATA_DIR}/{dataset_name}_{n_samples}/{split_name}.parquet")

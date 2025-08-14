@@ -4,14 +4,18 @@ import os
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
+dataset = "fineweb"
+
+DATA_DIR = "/home/wyf/ai/causal-llm/data"
+TOKENIZER_DIR = "/home/wyf/ai/causal-llm/tokenizer"
+
 n_samples = 2_000_000
 context_length = 1024
 
 datasets = DatasetDict({
-    "train": Dataset.from_parquet(f"./data/dclm_{n_samples}/train.parquet"),
-    "valid": Dataset.from_parquet(f"./data/dclm_{n_samples}/valid.parquet")
+    "train": Dataset.from_parquet(f"{DATA_DIR}/{dataset}_{n_samples}/train.parquet"),
+    "valid": Dataset.from_parquet(f"{DATA_DIR}/{dataset}_{n_samples}/valid.parquet")
 })
-
 
 
 # 7.4s on 1k examples
@@ -43,4 +47,4 @@ tokenizer = PreTrainedTokenizerFast(
     unk_token="<unk>",         # Replaces unknown words
     pad_token="<pad>",         # Used for padding shorter sequences
 )
-tokenizer.save_pretrained(f"./tokenizers/spm_{n_samples}")
+tokenizer.save_pretrained(f"{TOKENIZER_DIR}/{dataset}_spm_{n_samples}")

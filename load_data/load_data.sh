@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #SBATCH -p mit_normal
-#SBATCH --mincpus 16
+#SBATCH --mincpus 64
 #SBATCH --mem 256000
 
 module load miniforge

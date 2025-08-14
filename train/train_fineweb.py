@@ -1,3 +1,15 @@
+### ACCELERATE CONFIG
+
+from accelerate import Accelerator
+import os
+
+accelerator = Accelerator()
+
+if not accelerator.is_main_process:
+    os.environ["WANDB_MODE"] = "disabled"
+    print = lambda *args: None
+
+
 ### IMPORTS
 from datasets import load_dataset, Dataset, DatasetDict
 
@@ -7,28 +19,45 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 n_samples = 200_000
 context_length = 1024
+dataset = "fineweb"
+
+
+import wandb
+wandb.init(
+    project="causal-llm-training",
+    name=f"reverse-model-{dataset}-2B-training",
+    entity="womogenes-team",
+    config={
+        "n_samples": n_samples,
+        "context_length": context_length,
+        "dataset": dataset,
+    }
+)
 
 
 DATA_DIR = "/home/wyf/ai/causal-llm/data"
 TOKENIZER_DIR = "/home/wyf/ai/causal-llm/tokenizers"
+MODEL_DIR = "/home/wyf/ai/causal-llm/models"
 
 
 ### LOAD DATASETS
 datasets = DatasetDict({
-    "train": Dataset.from_parquet(f"{DATA_DIR}/fineweb_{n_samples}/train.parquet"),
-    "valid": Dataset.from_parquet(f"{DATA_DIR}/fineweb_{n_samples}/valid.parquet")
+    "train": Dataset.from_parquet(f"{DATA_DIR}/{dataset}_{n_samples}/train.parquet"),
+    "valid": Dataset.from_parquet(f"{DATA_DIR}/{dataset}_{n_samples}/valid.parquet")
 })
 
 
 ### LOAD TOKENIZER
 from transformers import PreTrainedTokenizerFast
-tokenizer = PreTrainedTokenizerFast.from_pretrained(f"{TOKENIZER_DIR}/fineweb_spm_200k")
+tokenizer = PreTrainedTokenizerFast.from_pretrained(f"{TOKENIZER_DIR}/{dataset}_spm_200k")
 
 
 
 ### LOAD TOKENIZED DATASETS
-tokenized_dataset = Dataset.from_parquet(f"{DATA_DIR}/fineweb_{n_samples}_tokenized_{context_length}.parquet")
-tokenized_dataset_valid = Dataset.from_parquet(f"{DATA_DIR}/fineweb_{n_samples}_tokenized_{context_length}_valid.parquet")
+tokenized_dataset = Dataset.from_parquet(
+    f"{DATA_DIR}/{dataset}_{n_samples}_tokenized_{context_length}.parquet")
+tokenized_dataset_valid = Dataset.from_parquet(
+    f"{DATA_DIR}/{dataset}_{n_samples}_tokenized_{context_length}_valid.parquet")
 
 print(tokenized_dataset)
 print(f"Produced dataset of {tokenized_dataset.num_rows:,} rows, {context_length} tokens each")
@@ -69,8 +98,8 @@ config = LlamaConfig(
     eos_token_id=tokenizer.eos_token_id,
 )
 
-model = LlamaForCausalLM(config).to("cuda")
-# model = LlamaForCausalLM.from_pretrained().to("cuda")
+# model = LlamaForCausalLM(config).to("cuda")
+model = LlamaForCausalLM.from_pretrained(f"{MODEL_DIR}/reverse-model-fineweb-2B/checkpoint-1200").to("cuda")
 
 model_size = sum(t.numel() for t in model.parameters())
 print(f"Model size: {model_size/1000**2:.1f}M parameters")
@@ -92,7 +121,9 @@ data_collator = DataCollatorForLanguageModeling(tokenizer, mlm=False)
 from transformers import Trainer, TrainingArguments
 
 args = TrainingArguments(
-    output_dir="models/reverse-model-fineweb-2B",
+    output_dir=f"{MODEL_DIR}/reverse-model-{dataset}-2B",
+    report_to="wandb",
+    run_name=f"reverse-model-{dataset}-2B-training",
     
     # Batch size settings - LEDOM uses global batch size of 1024 sequences
     per_device_train_batch_size=1,  # Micro-batch size per GPU
@@ -100,15 +131,15 @@ args = TrainingArguments(
     gradient_accumulation_steps=32, # To achieve global batch size (adjust based on GPU count)
 
     eval_strategy="steps",          # Evaluate every N steps
-    eval_steps=5000,                # Eval every N steps  
-    logging_steps=1,                # More frequent logging to match their monitoring
+    eval_steps=200,                 # Eval every N steps  
+    logging_steps=1,                # More frequent logging to match monitoring
     
     # Training duration - LEDOM trained for ~51,900 iterations for 7B model
     num_train_epochs=1,             # Keep as 1 epoch since they trained on 435B tokens once
     
     # Optimizer settings - match LEDOM exactly
     optim="adamw_torch",
-    learning_rate=1.12e-5,           # Whee
+    learning_rate=2e-4,           # Whee
     weight_decay=0.1,             # Matches their setting
     adam_beta1=0.9,               # Adam β₁
     adam_beta2=0.95,              # Adam β₂  
@@ -119,7 +150,7 @@ args = TrainingArguments(
     warmup_steps=10,
 
     # Gradient settings
-    max_grad_norm=100.0,            # Gradient clipping norm
+    max_grad_norm=10.0,            # Gradient clipping norm
     
     # Precision - LEDOM uses BF16, not FP16
     bf16=True,                    # Use BF16 instead of FP16
@@ -127,8 +158,8 @@ args = TrainingArguments(
     
     # Checkpointing
     save_steps=200,
-    save_total_limit=3,           # Reasonable limit for storage
-    save_only_model=False,        # Save optimizer too for easy resumption
+    save_total_limit=1,           # Reasonable limit for storage
+    save_only_model=True,
     
     # Additional LEDOM-specific settings
     dataloader_num_workers=2,     # For efficiency
@@ -137,6 +168,10 @@ args = TrainingArguments(
     # Disable features not used in LEDOM training
     load_best_model_at_end=False,
 )
+
+print(f"\n=== BEGIN TRAINING ARGS ===")
+print(args)
+print(f"=== END TRAINING ARGS ===\n")
 
 trainer = Trainer(
     model=model,
@@ -151,7 +186,6 @@ trainer = Trainer(
 ### TRAINING
 torch.cuda.empty_cache()
 
-# 1m for 1k samples (2.2M tokens)
 trainer.train()
 
 
