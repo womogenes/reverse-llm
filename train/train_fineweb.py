@@ -1,3 +1,9 @@
+### THINGS TO CHANGE IN THIS FILE (fix to not hardcode later)
+# - model name (be descriptive)
+# - wandb config values for logging
+# - checkpoint
+
+
 ### ACCELERATE CONFIG
 
 from accelerate import Accelerator
@@ -17,34 +23,32 @@ import os
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
-n_samples = 200_000
+n_samples = 2_000_000
 context_length = 1024
 dataset = "fineweb"
+batch_size = 2_0
 
+
+model_name = f"reverse-model-2B-{dataset}-{n_samples}-batchsize-{batch_size}"
 
 import wandb
 wandb.init(
     project="causal-llm-training",
-    name=f"reverse-model-{dataset}-2B-training",
+    name=model_name,
     entity="womogenes-team",
     config={
         "n_samples": n_samples,
         "context_length": context_length,
         "dataset": dataset,
-    }
+        "batchsize": batch_size,
+    },
+    resume="allow",
 )
 
 
-DATA_DIR = "/home/wyf/ai/causal-llm/data"
+DATA_DIR = "/home/wyf/orcd/pool/causal-llm/data"
 TOKENIZER_DIR = "/home/wyf/ai/causal-llm/tokenizers"
 MODEL_DIR = "/home/wyf/ai/causal-llm/models"
-
-
-### LOAD DATASETS
-datasets = DatasetDict({
-    "train": Dataset.from_parquet(f"{DATA_DIR}/{dataset}_{n_samples}/train.parquet"),
-    "valid": Dataset.from_parquet(f"{DATA_DIR}/{dataset}_{n_samples}/valid.parquet")
-})
 
 
 ### LOAD TOKENIZER
@@ -55,9 +59,11 @@ tokenizer = PreTrainedTokenizerFast.from_pretrained(f"{TOKENIZER_DIR}/{dataset}_
 
 ### LOAD TOKENIZED DATASETS
 tokenized_dataset = Dataset.from_parquet(
-    f"{DATA_DIR}/{dataset}_{n_samples}_tokenized_{context_length}.parquet")
+    f"{DATA_DIR}/{dataset}_{n_samples}/tokenized_{context_length}.parquet")
 tokenized_dataset_valid = Dataset.from_parquet(
-    f"{DATA_DIR}/{dataset}_{n_samples}_tokenized_{context_length}_valid.parquet")
+    f"{DATA_DIR}/{dataset}_{n_samples}/tokenized_{context_length}_valid.parquet")
+
+print(f"Dataset size: {tokenized_dataset.num_rows * context_length:,} tokens")
 
 print(tokenized_dataset)
 print(f"Produced dataset of {tokenized_dataset.num_rows:,} rows, {context_length} tokens each")
@@ -98,8 +104,7 @@ config = LlamaConfig(
     eos_token_id=tokenizer.eos_token_id,
 )
 
-# model = LlamaForCausalLM(config).to("cuda")
-model = LlamaForCausalLM.from_pretrained(f"{MODEL_DIR}/reverse-model-fineweb-2B/checkpoint-1200").to("cuda")
+model = LlamaForCausalLM(config).to("cuda")
 
 model_size = sum(t.numel() for t in model.parameters())
 print(f"Model size: {model_size/1000**2:.1f}M parameters")
@@ -121,17 +126,16 @@ data_collator = DataCollatorForLanguageModeling(tokenizer, mlm=False)
 from transformers import Trainer, TrainingArguments
 
 args = TrainingArguments(
-    output_dir=f"{MODEL_DIR}/reverse-model-{dataset}-2B",
+    output_dir=f"{MODEL_DIR}/{model_name}",
     report_to="wandb",
-    run_name=f"reverse-model-{dataset}-2B-training",
     
     # Batch size settings - LEDOM uses global batch size of 1024 sequences
-    per_device_train_batch_size=1,  # Micro-batch size per GPU
-    per_device_eval_batch_size=1,   # Used in their fine-tuning setup
-    gradient_accumulation_steps=32, # To achieve global batch size (adjust based on GPU count)
+    per_device_train_batch_size=batch_size,          # Micro-batch size per GPU
+    per_device_eval_batch_size=batch_size,           # Used in their fine-tuning setup
+    gradient_accumulation_steps=1,                  # To achieve global batch size (adjust based on GPU count)
 
     eval_strategy="steps",          # Evaluate every N steps
-    eval_steps=200,                 # Eval every N steps  
+    eval_steps=1000,                # Eval every N steps
     logging_steps=1,                # More frequent logging to match monitoring
     
     # Training duration - LEDOM trained for ~51,900 iterations for 7B model
@@ -157,9 +161,9 @@ args = TrainingArguments(
     fp16=False,                   # Disable FP16
     
     # Checkpointing
-    save_steps=200,
+    save_steps=1000,
     save_total_limit=1,           # Reasonable limit for storage
-    save_only_model=True,
+    save_only_model=False,
     
     # Additional LEDOM-specific settings
     dataloader_num_workers=2,     # For efficiency
@@ -186,7 +190,9 @@ trainer = Trainer(
 ### TRAINING
 torch.cuda.empty_cache()
 
-trainer.train()
+checkpoint = f"{MODEL_DIR}/{model_name}/checkpoint-10000"
+# checkpoint = None
+trainer.train(resume_from_checkpoint=checkpoint)
 
 
 
