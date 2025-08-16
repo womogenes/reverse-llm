@@ -37,3 +37,10 @@ if __name__ == "__main__":
     print("=== SAMPLE DATA ===")
     print(list(split_datasets["train"].take(1))[0]["text"][500::-1])
     print()
+
+    for split in split_datasets:
+        print(f"Saving {split} to disk...")
+        split_datasets[split].map(
+            lambda x: { "text": x["text"][::-1] },
+            remove_columns=["text"],
+        ).save_to_disk(f"{DATA_DIR}/{dataset_name}/{split}")
