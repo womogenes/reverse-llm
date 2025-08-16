@@ -1,9 +1,11 @@
-import time
 import os
+from tqdm import tqdm
 
 os.environ["TOKENIZERS_PARALLELISM"] = "true"
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 os.environ["HF_DATASETS_CACHE"] = "/mnt/william/.cache"
+
+os.environ["PYTHONUNBUFFERED"] = "1"
 
 ### CONFIG ###
 
@@ -13,18 +15,13 @@ DATA_DIR = "/mnt/william/reverse-llm/data"
 TOKENIZER_DIR = "/mnt/william/reverse-llm/tokenizers"
 
 ### CONFIG ###
+def main():
+    print(f"Loading dataset {dataset_name}...")
 
-if __name__ == "__main__":
-    print(f"Downloading dataset {dataset_name}...")
-    time.sleep(10)
-
-    from datasets import DatasetDict, Dataset
+    from datasets import Dataset
 
     # Dataset is too big to fit into memory so we stream
-    split_datasets = DatasetDict({
-        "train": Dataset.load_from_disk(f"{DATA_DIR}/{dataset_name}/train"),
-        "valid": Dataset.load_from_disk(f"{DATA_DIR}/{dataset_name}/val"),
-    })
+    train_dataset = Dataset.load_from_disk(f"{DATA_DIR}/{dataset_name}/train")
 
     # Train tokenizer (7.4s on 1k examples)
     # 3m 30s on 200k examples
@@ -33,9 +30,14 @@ if __name__ == "__main__":
     from tokenizers import SentencePieceBPETokenizer
 
     def text_iterator():
-        fraction = 0.002
-        n_samples = int(split_datasets["train"].num_rows * fraction)
-        for x in split_datasets["train"]["text"].shuffle(seed=0).select(range(n_samples)):
+        fraction = 0.02
+        n_samples = int(train_dataset.num_rows * fraction)
+        print(f"Using {n_samples:,} samples")
+
+        print("Shuffling dataset and selecting samples...")
+        filtered_dataset = train_dataset.shuffle(seed=0).select(range(n_samples))
+        print("Generating text iterator...")
+        for x in tqdm(filtered_dataset["text"]):
             yield x
 
     print("Training tokenizer...")
@@ -47,4 +49,19 @@ if __name__ == "__main__":
         show_progress=True,
     )
 
-    spm_tokenizer.save(f"{TOKENIZER_DIR}/{dataset_name}")
+    from transformers import PreTrainedTokenizerFast
+
+    tokenizer = PreTrainedTokenizerFast(
+        tokenizer_object=spm_tokenizer,
+        bos_token="<s>",           # Always added at start
+        eos_token="</s>",          # Always added at end  
+        unk_token="<unk>",         # Replaces unknown words
+        pad_token="<pad>",         # Used for padding shorter sequences
+    )
+
+    tokenizer_path = f"{TOKENIZER_DIR}/{dataset_name}"
+    print(f"Saving tokenizer to {tokenizer_path}")
+    os.makedirs(TOKENIZER_DIR, exist_ok=True)
+    tokenizer.save(tokenizer_path)
+
+main()

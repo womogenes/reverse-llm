@@ -1,4 +1,4 @@
-from datasets import load_dataset, DatasetDict
+from datasets import DatasetDict, Dataset, load_dataset
 import time
 import os
 
@@ -19,19 +19,23 @@ if __name__ == "__main__":
     print(f"Downloading dataset {dataset_name}...")
     time.sleep(1)
 
-    # Takes like 30s to load (it's bad)
-    raw_dataset = load_dataset(
-        "HuggingFaceFW/fineweb-edu",
-        split="train",
-        name="sample-10BT",
-        cache_dir="/mnt/william/.cache",
-    )
+    # raw_dataset = load_dataset(
+    #     "HuggingFaceFW/fineweb-edu",
+    #     split="train",
+    #     name="sample-10BT",
+    #     cache_dir="/mnt/william/.cache",
+    # )
 
     print("Generating split datasets...")
-    split_datasets = raw_dataset.train_test_split(test_size=0.005, seed=0)
+    # split_datasets = raw_dataset.train_test_split(test_size=0.005, seed=0)
+    # split_datasets = DatasetDict({
+    #     "train": split_datasets["train"],
+    #     "valid": split_datasets["test"],
+    # })
+
     split_datasets = DatasetDict({
-        "train": split_datasets["train"],
-        "valid": split_datasets["test"],
+        "train": Dataset.load_from_disk(f"{DATA_DIR}/{dataset_name}/train"),
+        "valid": Dataset.load_from_disk(f"{DATA_DIR}/{dataset_name}/valid"),
     })
 
     print("=== SAMPLE DATA ===")
@@ -43,4 +47,4 @@ if __name__ == "__main__":
         split_datasets[split].map(
             lambda x: { "text": x["text"][::-1] },
             remove_columns=["text"],
-        ).save_to_disk(f"{DATA_DIR}/{dataset_name}/{split}")
+        ).to_parquet(f"{DATA_DIR}/{dataset_name}/{split}_10k_batch.parquet", batch_size=10_000)
