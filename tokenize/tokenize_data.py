@@ -19,7 +19,7 @@ def main():
 
     print(split_datasets)
 
-    print("=== BEGIN EXAMPLE DATA (REVERSED) ===")
+    print("=== BEGIN EXAMPLE DATA (SHOULD READ FORWARDS) ===")
     print(list(split_datasets["train"].take(1))[0]["text"][500::-1])
     print()
 
@@ -33,7 +33,7 @@ def main():
 
     def tokenize(element):
         outputs = tokenizer(
-            element["text"],
+            [t[-1] for t in element["text"]],
             truncation=True,
             max_length=context_length,
             # padding="max_length",
@@ -62,7 +62,9 @@ def main():
                 desc=f"Tokenizing {split}...",
             )
 
-    print(f"Sample data: {tokenizer.decode(tokenized_datasets['train'].take(0)['input_ids'])[:100]}")
+    print("=== SAMPLE DATA (SHOULD READ BACKWARDS) ===")
+    print(f"{tokenizer.decode(tokenized_datasets['train'].take(0)['input_ids'])[:100]}")
+    print(tokenized_datasets["train"])
 
     # Takes a hot minute to save
     # 30min for 2M fineweb examples

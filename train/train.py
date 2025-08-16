@@ -24,9 +24,9 @@ import os
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
-context_length = 4096 
+context_length = 1024
 dataset = "fineweb-10BT"
-batch_size = 5
+batch_size = 20
 
 
 model_name = f"reverse-model-2B-{dataset}-ctx-{context_length}-batchsize-{batch_size}"
@@ -172,8 +172,8 @@ trainer = Trainer(
 ### TRAINING
 torch.cuda.empty_cache()
 
-checkpoint = f"{MODEL_DIR}/{model_name}/checkpoint-1000"
-# checkpoint = None
+# checkpoint = f"{MODEL_DIR}/{model_name}/checkpoint-9000"
+checkpoint = None
 trainer.train(resume_from_checkpoint=checkpoint)
 
 ### EVALUATE

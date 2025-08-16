@@ -26,7 +26,7 @@ volumes = {
 app = modal.App(image=image, volumes=volumes)
 
 @app.function(
-    cpu=8,
+    cpu=64,
     # memory=512,
     memory=1024*84,
     volumes=volumes,
@@ -52,8 +52,8 @@ def train_tokenizer():
 
 
 @app.function(
-    cpu=24,
-    memory=1024*4,
+    cpu=32,
+    memory=1024*32,
     volumes=volumes,
     timeout=60*60*24,
 )
@@ -65,7 +65,7 @@ def tokenize_data():
 
 n_gpus = 8
 @app.function(
-    cpu=10,
+    cpu=12,
     gpu=f"h200:{n_gpus}",
     memory=1024*48,
     volumes=volumes,

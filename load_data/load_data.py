@@ -39,9 +39,16 @@ def main():
 
     for split in split_datasets:
         save_path = f"{DATA_DIR}/{dataset_name}/{split}"
-        split_datasets[split].select_columns(["text"]).map(
-            lambda x: { "text": x["text"][::-1] },
-            remove_columns=["text"],
-        ).save_to_disk(save_path)
+        # split_datasets[split].select_columns(["text"]).map(
+        #     lambda batch: { "text": [text[::-1] for text in batch["text"]] },
+        #     batched=True,
+        #     batch_size=1_000,
+        #     num_proc=int(os.cpu_count() * 1.5),
+        #     remove_columns=["text"],
+        # ).save_to_disk(save_path)
+
+        split_datasets[split].select_columns(["text"]).save_to_disk(save_path)
+
+        print(f"Saved split {split} to {save_path}")
 
 main()
