@@ -3,7 +3,7 @@ from datasets import Dataset, DatasetDict
 import sys
 
 import os
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
+os.environ["TOKENIZERS_PARALLELISM"] = "true"
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 n_samples = 10_000_000_000
@@ -31,7 +31,7 @@ print(f"Context length: {context_length}")
 
 def tokenize(element):
     outputs = tokenizer(
-        element["text"],
+        element["text"][::-1],
         truncation=True,
         max_length=context_length,
         return_overflowing_tokens=True,
