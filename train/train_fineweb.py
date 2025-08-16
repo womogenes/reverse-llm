@@ -8,6 +8,7 @@
 
 from accelerate import Accelerator
 import os
+import math
 
 accelerator = Accelerator()
 
@@ -23,13 +24,13 @@ import os
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
-n_samples = 2_000_000
-context_length = 1024
-dataset = "fineweb"
-batch_size = 2_0
+n_samples = int(1e9) 
+context_length = 4096 
+dataset = "fineweb-10BT"
+batch_size = 5
 
 
-model_name = f"reverse-model-2B-{dataset}-{n_samples}-batchsize-{batch_size}"
+model_name = f"reverse-model-2B-{dataset}-ctx-{context_length}-batchsize-{batch_size}"
 
 import wandb
 wandb.init(
@@ -53,15 +54,15 @@ MODEL_DIR = "/home/wyf/ai/causal-llm/models"
 
 ### LOAD TOKENIZER
 from transformers import PreTrainedTokenizerFast
-tokenizer = PreTrainedTokenizerFast.from_pretrained(f"{TOKENIZER_DIR}/{dataset}_spm_200k")
+tokenizer = PreTrainedTokenizerFast.from_pretrained(f"{TOKENIZER_DIR}/fineweb_spm_1M")
 
 
 
 ### LOAD TOKENIZED DATASETS
 tokenized_dataset = Dataset.from_parquet(
-    f"{DATA_DIR}/{dataset}_{n_samples}/tokenized_{context_length}.parquet")
+    f"{DATA_DIR}/{dataset}/tokenized_{context_length}_train.parquet")
 tokenized_dataset_valid = Dataset.from_parquet(
-    f"{DATA_DIR}/{dataset}_{n_samples}/tokenized_{context_length}_valid.parquet")
+    f"{DATA_DIR}/{dataset}/tokenized_{context_length}_valid.parquet")
 
 print(f"Dataset size: {tokenized_dataset.num_rows * context_length:,} tokens")
 
@@ -79,6 +80,10 @@ print(f"PAD token ID: {tokenizer.pad_token_id}")
 sample_text = "hello world"
 tokens = tokenizer(sample_text)
 print(f"Sample tokens: {tokens}")
+
+
+# Check sample data
+print()
 
 
 ### INITIALIZE MODEL
@@ -130,9 +135,9 @@ args = TrainingArguments(
     report_to="wandb",
     
     # Batch size settings - LEDOM uses global batch size of 1024 sequences
-    per_device_train_batch_size=batch_size,          # Micro-batch size per GPU
-    per_device_eval_batch_size=batch_size,           # Used in their fine-tuning setup
-    gradient_accumulation_steps=1,                  # To achieve global batch size (adjust based on GPU count)
+    per_device_train_batch_size=batch_size,                             # Micro-batch size per GPU
+    per_device_eval_batch_size=batch_size,                              # Used in their fine-tuning setup
+    gradient_accumulation_steps=math.ceil(32 / batch_size / 2),         # To achieve global batch size (adjust based on GPU count)
 
     eval_strategy="steps",          # Evaluate every N steps
     eval_steps=1000,                # Eval every N steps
@@ -151,7 +156,7 @@ args = TrainingArguments(
     
     # Learning rate schedule - LEDOM uses cosine with specific warmup
     lr_scheduler_type="cosine",
-    warmup_steps=10,
+    warmup_steps=2_000,
 
     # Gradient settings
     max_grad_norm=10.0,            # Gradient clipping norm
@@ -190,8 +195,8 @@ trainer = Trainer(
 ### TRAINING
 torch.cuda.empty_cache()
 
-checkpoint = f"{MODEL_DIR}/{model_name}/checkpoint-10000"
-# checkpoint = None
+# checkpoint = f"{MODEL_DIR}/{model_name}/checkpoint-10000"
+checkpoint = None
 trainer.train(resume_from_checkpoint=checkpoint)
 
 
