@@ -21,6 +21,7 @@ def main():
     from datasets import Dataset
 
     # Dataset is too big to fit into memory so we stream
+    # train_dataset = Dataset.from_parquet(f"{DATA_DIR}/{dataset_name}/train.parquet")
     train_dataset = Dataset.load_from_disk(f"{DATA_DIR}/{dataset_name}/train")
 
     # Train tokenizer (7.4s on 1k examples)
@@ -59,9 +60,9 @@ def main():
         pad_token="<pad>",         # Used for padding shorter sequences
     )
 
-    tokenizer_path = f"{TOKENIZER_DIR}/{dataset_name}"
+    tokenizer_path = f"{TOKENIZER_DIR}/fineweb_spm_200k"
     print(f"Saving tokenizer to {tokenizer_path}")
     os.makedirs(TOKENIZER_DIR, exist_ok=True)
-    tokenizer.save(tokenizer_path)
+    tokenizer.save_pretrained(tokenizer_path)
 
 main()
