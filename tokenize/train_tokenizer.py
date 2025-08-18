@@ -3,7 +3,7 @@ from tqdm import tqdm
 
 os.environ["TOKENIZERS_PARALLELISM"] = "true"
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
-os.environ["HF_DATASETS_CACHE"] = "/mnt/william/.cache"
+os.environ["HF_DATASETS_CACHE"] = "~/orcd/pool/.cache"
 
 os.environ["PYTHONUNBUFFERED"] = "1"
 
@@ -11,8 +11,8 @@ os.environ["PYTHONUNBUFFERED"] = "1"
 
 dataset_name = "fineweb-10BT"
 
-DATA_DIR = "/mnt/william/reverse-llm/data"
-TOKENIZER_DIR = "/mnt/william/reverse-llm/tokenizers"
+DATA_DIR = "/home/wyf/orcd/pool/reverse-llm/data"
+TOKENIZER_DIR = "/home/wyf/orcd/pool/reverse-llm/tokenizers"
 
 ### CONFIG ###
 def main():
@@ -20,49 +20,38 @@ def main():
 
     from datasets import Dataset
 
-    # Dataset is too big to fit into memory so we stream
-    # train_dataset = Dataset.from_parquet(f"{DATA_DIR}/{dataset_name}/train.parquet")
     train_dataset = Dataset.load_from_disk(f"{DATA_DIR}/{dataset_name}/train")
+    print(train_dataset)
+    print(f"=== SAMPLE DATA (SHOULD READ FORWARDS) ===")
+    print(train_dataset[0]["text"])
 
-    # Train tokenizer (7.4s on 1k examples)
-    # 3m 30s on 200k examples
-    # 20m on 900k examples (fineweb-10BT)
-
-    from tokenizers import SentencePieceBPETokenizer
+    from tokenizers import ByteLevelBPETokenizer
 
     def text_iterator():
-        fraction = 0.02
-        n_samples = int(train_dataset.num_rows * fraction)
-        print(f"Using {n_samples:,} samples")
+        n_samples = 200_000
+        print(f"Using {n_samples:,} samples ({n_samples / len(train_dataset):.2%} of dataset)")
 
         print("Shuffling dataset and selecting samples...")
         filtered_dataset = train_dataset.shuffle(seed=0).select(range(n_samples))
         print("Generating text iterator...")
         for x in tqdm(filtered_dataset["text"]):
-            yield x
+            yield x[::-1]
 
     print("Training tokenizer...")
-    spm_tokenizer = SentencePieceBPETokenizer()
-    spm_tokenizer.train_from_iterator(
+    bpe_tokenizer = ByteLevelBPETokenizer()
+    bpe_tokenizer.train_from_iterator(
         text_iterator(),
         vocab_size=52_000,
         min_frequency=5,
         show_progress=True,
+        special_tokens = ["<s>", "<pad>", "</s>", "<unk>", "<mask>"]
     )
 
-    from transformers import PreTrainedTokenizerFast
-
-    tokenizer = PreTrainedTokenizerFast(
-        tokenizer_object=spm_tokenizer,
-        bos_token="<s>",           # Always added at start
-        eos_token="</s>",          # Always added at end  
-        unk_token="<unk>",         # Replaces unknown words
-        pad_token="<pad>",         # Used for padding shorter sequences
-    )
-
-    tokenizer_path = f"{TOKENIZER_DIR}/fineweb_spm_200k"
+    tokenizer_path = f"{TOKENIZER_DIR}/fineweb_bpe_200k"
     print(f"Saving tokenizer to {tokenizer_path}")
     os.makedirs(TOKENIZER_DIR, exist_ok=True)
-    tokenizer.save_pretrained(tokenizer_path)
+    bpe_tokenizer.save(tokenizer_path)
+
+    print(f"Done.")
 
 main()

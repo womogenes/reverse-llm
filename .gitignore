@@ -4,3 +4,7 @@ data/
 reverse-model*/
 tokenizers/
 *.log
+
+train/wandb/
+
+train/runs_*/

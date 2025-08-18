@@ -1,14 +1,9 @@
-### THINGS TO CHANGE IN THIS FILE (fix to not hardcode later)
-# - model name (be descriptive)
-# - wandb config values for logging
-# - checkpoint
-
-
 ### ACCELERATE CONFIG
 
 from accelerate import Accelerator
 import os
 import math
+import torch
 
 accelerator = Accelerator()
 
@@ -16,6 +11,7 @@ if not accelerator.is_main_process:
     os.environ["WANDB_MODE"] = "disabled"
     print = lambda *args: None
 
+n_gpus = accelerator.num_processes
 
 ### IMPORTS
 from datasets import Dataset
@@ -26,27 +22,31 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 context_length = 1024
 dataset = "fineweb-10BT"
-batch_size = 20
 
+model_name = f"reverse-gpt2-0.35B-{dataset}-ctx-{context_length}"
 
-model_name = f"reverse-model-2B-{dataset}-ctx-{context_length}-batchsize-{batch_size}"
-
-DATA_DIR = "/mnt/william/reverse-llm/data"
-TOKENIZER_DIR = "/mnt/william/reverse-llm/tokenizers"
-MODEL_DIR = "/mnt/william/reverse-llm/models"
+DATA_DIR = "/home/wyf/orcd/pool/reverse-llm/data"
+TOKENIZER_DIR = "/home/wyf/orcd/pool/reverse-llm/tokenizers"
+MODEL_DIR = "/home/wyf/orcd/pool/reverse-llm/models"
 
 
 ### LOAD TOKENIZER
 from transformers import PreTrainedTokenizerFast
-tokenizer = PreTrainedTokenizerFast.from_pretrained(f"{TOKENIZER_DIR}/fineweb_spm_200k")
+tokenizer = PreTrainedTokenizerFast(
+    tokenizer_file=f"{TOKENIZER_DIR}/fineweb_bpe_200k.json",
+    bos_token="<s>",
+    eos_token="</s>",
+    unk_token="<unk>",
+    pad_token="<pad>",
+    mask_token="<mask>",
+)
 
 
 ### LOAD TOKENIZED DATASETS
 tokenized_datasets = {}
 for split in ["train", "valid"]:
     tokenized_datasets[split] = (
-        Dataset.from_parquet(
-            f"{DATA_DIR}/{dataset}/tokenized_{context_length}_{split}.parquet")
+        Dataset.load_from_disk(f"{DATA_DIR}/{dataset}/tokenized_{context_length}_{split}")
         .select_columns(["input_ids"])
     )
 
@@ -69,32 +69,25 @@ print(tokenizer.decode(tokenized_datasets['train'][0]['input_ids'])[:100])
 
 
 ### INITIALIZE MODEL
+from transformers import GPT2Config, GPT2LMHeadModel
 
-# 3.2s to initialize model
-from transformers import LlamaConfig, LlamaForCausalLM
-import torch
-
-model_size = "2B"
-
-config = LlamaConfig(
-    vocab_size=len(tokenizer),
-    max_position_embeddings=8192,
-    hidden_size=2048 if model_size == "2B" else 3072,
-    intermediate_size=16384 if model_size == "2B" else 24576,
-    num_hidden_layers=18 if model_size == "2B" else 28,
-    num_attention_heads=8 if model_size == "2B" else 16,
-    num_key_value_heads=1 if model_size == "2B" else 16,
-    rms_norm_eps=1e-5,
-    tie_word_embeddings=False,
-    rope_scaling=None,
+config = GPT2Config(
+    vocab_size=tokenizer.vocab_size,
+    n_positions=context_length,
+    n_ctx=context_length,
+    n_embd=1024,
+    n_layer=24,
+    n_head=16,
     bos_token_id=tokenizer.bos_token_id,
     eos_token_id=tokenizer.eos_token_id,
+    pad_token_id=tokenizer.pad_token_id,
 )
 
-model = LlamaForCausalLM(config).to("cuda")
+model = GPT2LMHeadModel(config).to("cuda")
+# model.gradient_checkpointing_enable()
 
 model_size = sum(t.numel() for t in model.parameters())
-print(f"Model size: {model_size/1000**3:.1f}B parameters")
+print(f"Model size: {model_size/1000**3:.3f}B parameters")
 
 
 ### SET UP DATA COLLATOR
@@ -107,49 +100,34 @@ from transformers import Trainer, TrainingArguments
 
 args = TrainingArguments(
     output_dir=f"{MODEL_DIR}/{model_name}",
-    report_to="wandb",
-    
-    per_device_train_batch_size=batch_size,
-    per_device_eval_batch_size=batch_size,
-    gradient_accumulation_steps=math.ceil(32 / batch_size / accelerator.num_processes),
-
-    eval_strategy="steps",
-    eval_steps=100,
-    logging_steps=1,
-    
+    overwrite_output_dir=True,
     num_train_epochs=1,
+    per_device_train_batch_size=64,
+    gradient_accumulation_steps=((1<<20) // (64 * n_gpus) // context_length),
     
-    optim="adamw_torch",
-    learning_rate=2e-4,
-    weight_decay=0.1,
-    adam_beta1=0.9,
-    adam_beta2=0.95,
-    adam_epsilon=1e-8,
-    
+    learning_rate=1e-4,
+    weight_decay=0.01,
+    warmup_ratio=0.03,
     lr_scheduler_type="cosine",
-    warmup_steps=2_000,
 
     max_grad_norm=1.0,
-    
-    bf16=True,
-    fp16=False,
-    
-    save_steps=100,
-    save_total_limit=3,
-    save_only_model=False,
-    dataloader_num_workers=2,
 
-    remove_unused_columns=False,
-    load_best_model_at_end=False,
-    
-    # Multi-gpu settings
-    ddp_find_unused_parameters=False,
+    logging_steps=1,
+    save_steps=500,
+    save_total_limit=3,
+    prediction_loss_only=True,
+    bf16=True,
+
+    report_to="wandb",
+    run_name=model_name,
+
+    torch_compile=True,
+    seed=0,
 )
 
 import wandb
-wandb.login(key=os.environ["WANDB_API_KEY"])
 wandb.init(
-    project="reverse-llm-training-modal",
+    project="reverse-llm-gpt2-0.35B",
     name=model_name,
     entity="womogenes-team",
     config=args.to_dict(),
@@ -172,8 +150,12 @@ trainer = Trainer(
 ### TRAINING
 torch.cuda.empty_cache()
 
-# checkpoint = f"{MODEL_DIR}/{model_name}/checkpoint-9000"
-checkpoint = None
+import torch
+print(f"VRAM allocated: {torch.cuda.memory_allocated()/1e9:.2f} GB")
+print(f"VRAM max allocated: {torch.cuda.max_memory_allocated()/1e9:.2f} GB")
+
+# checkpoint = None
+checkpoint = True
 trainer.train(resume_from_checkpoint=checkpoint)
 
 ### EVALUATE
