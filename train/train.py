@@ -109,12 +109,13 @@ args = TrainingArguments(
     weight_decay=0.01,
     warmup_ratio=0.03,
     lr_scheduler_type="cosine",
+    eval_steps=500,
 
     max_grad_norm=1.0,
 
     logging_steps=1,
     save_steps=500,
-    save_total_limit=3,
+    save_total_limit=None,
     prediction_loss_only=True,
     bf16=True,
 
