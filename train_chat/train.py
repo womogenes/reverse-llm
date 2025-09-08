@@ -13,12 +13,11 @@ DATA_DIR = "/home/wyf/orcd/pool/reverse-llm/data"
 TOKENIZER_DIR = "/home/wyf/orcd/pool/reverse-llm/tokenizers"
 MODEL_DIR = "/home/wyf/orcd/pool/reverse-llm/models"
 
-model_name = f"reverse-gpt2-0.35B-fineweb-10BT-ctx-1024"
+base_model_name = f"reverse-gpt2-0.35B-fineweb-10BT-ctx-1024"
 
 USER_ROLE_NAME = "user"[::-1]
 ASSISTANT_ROLE_NAME = "assistant"[::-1]
 
-dataset_name = "alpaca"
 context_length = 1024
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
@@ -28,25 +27,34 @@ tokenizer = PreTrainedTokenizerFast.from_pretrained(f"{TOKENIZER_DIR}/fineweb_bp
 tokenizer.add_special_tokens({ "additional_special_tokens": ["<im_start>", "<im_end>"] })
 
 
-from transformers import GPT2LMHeadModel
+from transformers import GPT2LMHeadModel, EarlyStoppingCallback
 
 # Load base model
 model = GPT2LMHeadModel.from_pretrained(
-    # f"{MODEL_DIR}/reverse-gpt2-0.35B-fineweb-10BT-ctx-1024/checkpoint-9000"
-    f"{MODEL_DIR}/reverse-gpt2-0.35B-fineweb-10BT-ctx-1024-chat/checkpoint-1050"
+    f"{MODEL_DIR}/reverse-gpt2-0.35B-fineweb-10BT-ctx-1024/checkpoint-9000"
+    # f"{MODEL_DIR}/reverse-gpt2-0.35B-fineweb-10BT-ctx-1024-chat-v2/checkpoint-105"
 )
 
 print(f"Tokenizer vocab size: {len(tokenizer)}")
 model.resize_token_embeddings(len(tokenizer))
 
 
-from datasets import Dataset
+from datasets import Dataset, concatenate_datasets
 
+print(f"Loading datasets...")
 tokenized = {
-    "train": Dataset.load_from_disk(f"{DATA_DIR}/{dataset_name}/tokenized_{context_length}_train"),
-    "valid": Dataset.load_from_disk(f"{DATA_DIR}/{dataset_name}/tokenized_{context_length}_valid"),
+    "train": concatenate_datasets([
+        Dataset.load_from_disk(f"{DATA_DIR}/alpaca/tokenized_{context_length}_train"),
+        Dataset.load_from_disk(f"{DATA_DIR}/databricks-dolly/tokenized_{context_length}_train"),
+        Dataset.load_from_disk(f"{DATA_DIR}/ultrachat/tokenized_{context_length}_train")
+    ]).shuffle(seed=0),
+    "valid": concatenate_datasets([
+        Dataset.load_from_disk(f"{DATA_DIR}/alpaca/tokenized_{context_length}_valid"),
+        Dataset.load_from_disk(f"{DATA_DIR}/databricks-dolly/tokenized_{context_length}_valid"),
+        Dataset.load_from_disk(f"{DATA_DIR}/ultrachat/tokenized_{context_length}_valid")
+    ]).shuffle(seed=0),
 }
-
+print(tokenized)
 
 import torch
 import gc
@@ -59,19 +67,28 @@ from trl import SFTTrainer, SFTConfig
 
 # Set up training arguments
 args = SFTConfig(
-    output_dir=f"{MODEL_DIR}/{model_name}-chat-v2",
-    run_name=f"{model_name}-chat",
+    output_dir=f"{MODEL_DIR}/{base_model_name}-chat-v15",
     report_to="wandb",
 
-    neftune_noise_alpha=10,
+    neftune_noise_alpha=15,
     per_device_train_batch_size=144,
     gradient_accumulation_steps=8,
-    learning_rate=2e-4,
     fp16=True,
     logging_steps=1,
+
+    weight_decay=0.01,
+
+    learning_rate=1.5e-4,
+    warmup_ratio=0.1,
     lr_scheduler_type="cosine",
-    num_train_epochs=5,
-    warmup_ratio=0.01,
+    # lr_scheduler_type="constant_with_warmup",
+    num_train_epochs=20,
+
+    eval_strategy="steps",
+    eval_steps=10,
+    metric_for_best_model="eval_loss",
+    greater_is_better=False,
+    save_steps=50,
 
     max_grad_norm=1.0,
     
@@ -86,12 +103,17 @@ wandb.init(
     config=args.to_dict(),
 )
 
+early_stopping_callback = EarlyStoppingCallback(
+    early_stopping_patience=3,
+)
+
 # Create trainer
 trainer = SFTTrainer(
     model=model,
     args=args,
     train_dataset=tokenized["train"],
     eval_dataset=tokenized["valid"],
+    callbacks=[early_stopping_callback],
 )
 
-trainer.train()
+trainer.train(resume_from_checkpoint=True)

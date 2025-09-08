@@ -4,7 +4,9 @@ data/
 reverse-model*/
 tokenizers/
 *.log
+*.out
 
 train/wandb/
+train_chat/wandb/
 
 train/runs_*/

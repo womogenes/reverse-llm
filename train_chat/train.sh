@@ -5,6 +5,6 @@
 #SBATCH --mincpus 32
 #SBATCH --mem 185000
 #SBATCH --time 360
-#SBATCH --output runs_alpaca/train_chat_v2_004.log
+#SBATCH --output runs_alpaca/train_chat_v15_combined_v3.log
 
 /home/wyf/.conda/envs/torch/bin/accelerate launch train.py
